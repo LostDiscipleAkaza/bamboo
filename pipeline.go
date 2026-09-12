@@ -88,8 +88,13 @@ func NewPipeline(cfg *Config) (*Pipeline, error) {
 		}
 		p.csvFile = f
 		p.csvWriter = csv.NewWriter(f)
-		p.csvWriter.Write([]string{"packet", "timestamp", "src_ip", "src_port", "dst_ip", "dst_port", "protocol", "score", "threshold", "phase"})
+		if err := p.csvWriter.Write([]string{"packet", "timestamp", "src_ip", "src_port", "dst_ip", "dst_port", "protocol", "score", "threshold", "phase"}); err != nil {
+			return nil, fmt.Errorf("failed to write CSV header to %s: %w", cfg.CSVOutput, err)
+		}
 		p.csvWriter.Flush()
+		if err := p.csvWriter.Error(); err != nil {
+			return nil, fmt.Errorf("failed to flush CSV header to %s: %w", cfg.CSVOutput, err)
+		}
 	}
 
 	return p, nil
@@ -182,16 +187,21 @@ func (p *Pipeline) ProcessPacket(packet gopacket.Packet) {
 		if isTraining {
 			phase = "train"
 		}
-		p.csvWriter.Write([]string{
+		if err := p.csvWriter.Write([]string{
 			strconv.Itoa(p.stats.TotalPackets),
 			strconv.FormatFloat(meta.Timestamp, 'f', 6, 64),
 			meta.SrcIP, meta.SrcPort, meta.DstIP, meta.DstPort, meta.Protocol,
 			strconv.FormatFloat(score, 'f', 6, 64),
 			strconv.FormatFloat(p.bambooSys.Threshold, 'f', 6, 64),
 			phase,
-		})
+		}); err != nil {
+			slog.Error("Failed to write CSV row", "packet", p.stats.TotalPackets, "error", err)
+		}
 		if p.stats.TotalPackets%csvFlushInterval == 0 {
 			p.csvWriter.Flush()
+			if err := p.csvWriter.Error(); err != nil {
+				slog.Error("Failed to flush CSV buffer", "packet", p.stats.TotalPackets, "error", err)
+			}
 		}
 	}
 
@@ -279,5 +289,9 @@ func (p *Pipeline) Stats() PipelineStats {
 	if p.bambooSys != nil {
 		p.stats.Threshold = p.bambooSys.Threshold
 	}
-	return p.stats
+	stats := p.stats
+	if stats.ExecPackets == 0 {
+		stats.MinScore = 0
+	}
+	return stats
 }

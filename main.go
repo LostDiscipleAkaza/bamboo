@@ -90,14 +90,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		sig := <-sigChan
-		slog.Warn("Received shutdown signal", "signal", sig.String())
-		cancel()
-	}()
-
 	// Initialize Packet Capture
 	handle, err := initCapture(cfg)
 	if err != nil {
@@ -105,6 +97,19 @@ func main() {
 		os.Exit(1)
 	}
 	defer handle.Close()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigChan
+		slog.Warn("Received shutdown signal", "signal", sig.String())
+		cancel()
+		// pcap_next_ex blocks in a cgo call on a live, idle interface and
+		// won't notice ctx.Done() until a packet arrives. Closing the handle
+		// here interrupts that blocking read immediately so shutdown is
+		// actually responsive.
+		handle.Close()
+	}()
 
 	// Initialize Prometheus Metrics Server
 	if cfg.MetricsEnabled {

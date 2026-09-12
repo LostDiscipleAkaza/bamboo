@@ -11,28 +11,29 @@ import (
 
 // IncStat maintains rolling damped 1D statistics (matches original AfterImage incStat)
 type IncStat struct {
-	Lambda float64 // Decay factor λ
-	Tlast  float64 // Last packet arrival time (seconds)
-	W      float64 // Damped weight (packet count)
-	LS     float64 // Linear sum of values (CF1)
-	SS     float64 // Sum of squared values (CF2)
+	Lambda      float64 // Decay factor λ
+	Tlast       float64 // Last packet arrival time (seconds)
+	W           float64 // Damped weight (packet count)
+	LS          float64 // Linear sum of values (CF1)
+	SS          float64 // Sum of squared values (CF2)
+	Initialized bool
 }
 
 // creates a new incremental statistic for a given lambda
 func NewIncStat(lambda float64) *IncStat {
 	return &IncStat{
-		Lambda: lambda,
-		Tlast:  0,
-		W:      1e-20, // match original: avoid division by zero
-		LS:     0,
-		SS:     0,
+		Lambda:      lambda,
+		Tlast:       0,
+		W:           1e-20, // match original: avoid division by zero
+		LS:          0,
+		SS:          0,
+		Initialized: false,
 	}
 }
 
 // Update decays past state and inserts new observation x at timestamp t
 func (s *IncStat) Update(x float64, t float64) {
-	// Decay existing state
-	if s.Tlast > 0 {
+	if s.Initialized {
 		dt := t - s.Tlast
 		if dt > 0 {
 			gamma := math.Exp2(-s.Lambda * dt)
@@ -42,8 +43,8 @@ func (s *IncStat) Update(x float64, t float64) {
 		}
 	}
 	s.Tlast = t
+	s.Initialized = true
 
-	// Update with new observation
 	s.LS += x
 	s.SS += x * x
 	s.W += 1.0
@@ -56,7 +57,7 @@ func (s *IncStat) Weight() float64 {
 
 // DecayedWeight returns the estimated weight decayed to currentTime without mutating internal state
 func (s *IncStat) DecayedWeight(currentTime float64) float64 {
-	if s.Tlast <= 0 || currentTime <= s.Tlast {
+	if !s.Initialized || currentTime <= s.Tlast {
 		return s.W
 	}
 	dt := currentTime - s.Tlast
@@ -148,7 +149,7 @@ func (c *IncStatCov) Update(streamIdx int, v float64, t float64) {
 // decayStream decays a stream's 1D stats to timestamp t without adding a value
 func (c *IncStatCov) decayStream(idx int, t float64) {
 	s := &c.Streams[idx]
-	if s.Tlast > 0 {
+	if s.Initialized {
 		dt := t - s.Tlast
 		if dt > 0 {
 			gamma := math.Exp2(-s.Lambda * dt)
@@ -177,7 +178,7 @@ func (c *IncStatCov) IsDecayed(currentTime float64, threshold float64) bool {
 	w0 := c.Streams[0].DecayedWeight(currentTime)
 	w1 := c.Streams[1].DecayedWeight(currentTime)
 	covW := c.CovW
-	if c.CovTlast > 0 && currentTime > c.CovTlast {
+	if currentTime > c.CovTlast {
 		covW *= math.Exp2(-c.Lambda * (currentTime - c.CovTlast))
 	}
 	return w0 < threshold && w1 < threshold && covW < threshold

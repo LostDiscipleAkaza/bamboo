@@ -115,7 +115,13 @@ func (ae *Autoencoder) Normalize01(x []float64, updateBounds bool) []float64 {
 		if diff <= 1e-16 {
 			norm[i] = 0.0
 		} else {
-			norm[i] = (val - ae.MinVal[i]) / diff
+			v := (val - ae.MinVal[i]) / diff
+			if v < 0 {
+				v = 0
+			} else if v > 1 {
+				v = 1
+			}
+			norm[i] = v
 		}
 	}
 	return norm
